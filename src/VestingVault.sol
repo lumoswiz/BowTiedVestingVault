@@ -30,10 +30,13 @@ contract VestingVault is Ownable {
     error Error_MismatchedTokensAndAmounts();
     error Error_ZeroAmount();
     error Error_VestingNotOver();
+    error Error_ExceedsMaxVestingDuration();
 
     /// -----------------------------------------------------------------------
     /// Storage variables
     /// -----------------------------------------------------------------------
+
+    uint256 internal constant MAX_VESTING_DURATION = 1460 days; // 4 years
 
     address public beneficiary;
 
@@ -68,6 +71,9 @@ contract VestingVault is Ownable {
 
         if (_endTimestamp <= startTimestamp) revert Error_InvalidTimeRange();
 
+        if (_endTimestamp - startTimestamp > MAX_VESTING_DURATION)
+            revert Error_ExceedsMaxVestingDuration();
+
         for (uint256 i; i < _tokens.length; ++i) {
             if (_amounts[i] == 0) revert Error_ZeroAmount();
 
@@ -77,6 +83,12 @@ contract VestingVault is Ownable {
                     amount: _amounts[i],
                     claimed: false
                 })
+            );
+
+            IERC20(_tokens[i]).transferFrom(
+                msg.sender,
+                address(this),
+                _amounts[i]
             );
         }
 

@@ -9,48 +9,53 @@ import {Utilities} from "./utils/Utilities.sol";
 import {MockERC20} from "./utils/MockERC20.sol";
 import {WETH} from "solmate/tokens/WETH.sol";
 
+// import {IERC20} from "openzeppelin-contracts/token/ERC20/IERC20.sol";
+
 contract VestingVaultTest is Test {
-    uint256 internal constant TOKEN_INITIAL_SUPPLY = 1_000e18;
+    uint256 internal constant TOKEN_INITIAL_SUPPLY = 69_420e18;
+
+    uint256 internal constant WETH_FUND_VAULT = 50 ether;
+    uint256 internal constant TOKEN_FUND_VAULT = 100e18;
 
     Utilities internal utils;
     VestingVault internal vault;
 
     address payable internal beneficiary;
     address payable internal vaultOwner;
+    address payable internal user;
 
-    MockERC20 tokenX;
-    MockERC20 tokenY;
+    MockERC20 tkn;
     WETH weth;
 
     function setUp() public {
         utils = new Utilities();
 
         // Create users: `beneficiary` and `vaultOwner`
-        address payable[] memory users = utils.createUsers(2);
+        address payable[] memory users = utils.createUsers(3);
         beneficiary = users[0];
         vaultOwner = users[1];
+        user = users[2];
+
+        deployVault();
 
         // Deploy token contracts, mint supply and distribute to vaultOwner
-        tokenX = new MockERC20("TokenX", "TKX", 18);
-        tokenX.mint(address(vaultOwner), TOKEN_INITIAL_SUPPLY);
-
-        assertEq(tokenX.balanceOf(address(vaultOwner)), TOKEN_INITIAL_SUPPLY);
-
-        tokenY = new MockERC20("TokenY", "TKY", 18);
-        tokenY.mint(address(vaultOwner), TOKEN_INITIAL_SUPPLY);
-
-        assertEq(tokenY.balanceOf(address(vaultOwner)), TOKEN_INITIAL_SUPPLY);
+        vm.startPrank(vaultOwner);
+        tkn = new MockERC20(TOKEN_INITIAL_SUPPLY);
+        tkn.approve(address(vault), type(uint256).max);
+        assertEq(tkn.balanceOf(address(vaultOwner)), TOKEN_INITIAL_SUPPLY);
 
         weth = new WETH();
 
         assertEq(weth.balanceOf(address(vaultOwner)), 0);
         assertEq(weth.totalSupply(), 0);
 
-        vm.prank(vaultOwner);
-        weth.deposit{value: 50 ether}();
+        weth.deposit{value: WETH_FUND_VAULT}();
+        weth.approve(address(vault), type(uint256).max);
 
-        assertEq(weth.balanceOf(address(vaultOwner)), 50 ether);
-        assertEq(weth.totalSupply(), 50 ether);
+        assertEq(weth.balanceOf(address(vaultOwner)), WETH_FUND_VAULT);
+        assertEq(weth.totalSupply(), WETH_FUND_VAULT);
+
+        vm.stopPrank();
     }
 
     function testDeployVault() public {
@@ -61,28 +66,121 @@ contract VestingVaultTest is Test {
         assertEq(vault.owner(), vaultOwner);
     }
 
-    function testAddresses() public {
-        emit log_address(address(tokenX));
-        emit log_address(address(tokenY));
-        emit log_address(address(weth));
+    function testFundVault() public {
+        uint256 endTimestamp = block.timestamp + 365 days;
+
+        (
+            address[] memory tokens,
+            uint256[] memory amounts
+        ) = setFundTokenAmounts();
+
+        uint256 ownerTknBalanceBefore = tkn.balanceOf(vaultOwner);
+        uint256 ownerWethBalanceBefore = weth.balanceOf(vaultOwner);
+
+        uint256 vaultTknBalanceBefore = tkn.balanceOf(address(vault));
+        uint256 vaultWethBalanceBefore = weth.balanceOf(address(vault));
+
+        vm.prank(vaultOwner);
+        vault.fund(tokens, amounts, endTimestamp);
+
+        for (uint256 i; i < tokens.length; ++i) {
+            (address addr, uint256 amt, bool claimed) = vault.vestingDetails(i);
+            assertEq(tokens[i], addr);
+            assertEq(amounts[i], amt);
+            assertEq(claimed, false);
+        }
+
+        assertEq(
+            stdMath.delta(ownerTknBalanceBefore, tkn.balanceOf(vaultOwner)),
+            TOKEN_FUND_VAULT
+        );
+        assertEq(
+            stdMath.delta(ownerWethBalanceBefore, weth.balanceOf(vaultOwner)),
+            WETH_FUND_VAULT
+        );
+
+        assertEq(
+            stdMath.delta(tkn.balanceOf(address(vault)), vaultTknBalanceBefore),
+            TOKEN_FUND_VAULT
+        );
+        assertEq(
+            stdMath.delta(
+                weth.balanceOf(address(vault)),
+                vaultWethBalanceBefore
+            ),
+            WETH_FUND_VAULT
+        );
     }
 
-    function testFundVault() public {
-        vm.startPrank(vaultOwner);
+    function testUserCannotFundVault() public {
+        deployVault();
+
+        uint256 endTimestamp = block.timestamp + 365 days;
+
+        vm.startPrank(user);
+
+        (
+            address[] memory tokens,
+            uint256[] memory amounts
+        ) = setFundTokenAmounts();
+
+        vm.expectRevert();
+        vault.fund(tokens, amounts, endTimestamp);
+
+        vm.stopPrank();
+    }
+
+    function testVaultEndTimestampLtMaxDuration() public {
+        deployVault();
+
+        uint256 endTimestamp = block.timestamp + 1465 days; // MAX_VESTING_DURATION = 1460 days
+
+        (
+            address[] memory tokens,
+            uint256[] memory amounts
+        ) = setFundTokenAmounts();
+
+        vm.prank(vaultOwner);
+        vm.expectRevert(VestingVault.Error_ExceedsMaxVestingDuration.selector);
+        vault.fund(tokens, amounts, endTimestamp);
+    }
+
+    function testBeneficiaryCanWithdrawFromVault() public {
+        deployVault();
+
+        uint256 endTimestamp = block.timestamp + 365 days;
+
+        (
+            address[] memory tokens,
+            uint256[] memory amounts
+        ) = setFundTokenAmounts();
+
+        vm.prank(vaultOwner);
+        vault.fund(tokens, amounts, endTimestamp);
+
+        vm.warp(block.timestamp + 366 days);
+        vm.prank(beneficiary);
+        vault.withdraw();
+    }
+
+    // Helper functions
+
+    function deployVault() public {
+        vm.prank(vaultOwner);
         vault = new VestingVault(beneficiary);
+    }
 
-        uint256 _endTimestamp = block.timestamp + 365 days;
+    function setFundTokenAmounts()
+        public
+        view
+        returns (address[] memory tokens, uint256[] memory amounts)
+    {
+        tokens = new address[](2);
+        tokens[0] = address(tkn);
+        tokens[1] = address(weth);
 
-        address[] memory _tokens = new address[](3);
-        _tokens[0] = address(tokenX);
-        _tokens[1] = address(tokenY);
-        _tokens[2] = address(weth);
-
-        uint256[] memory _amounts = new uint256[](3);
-        _amounts[0] = 100e18;
-        _amounts[1] = 100e18;
-        _amounts[2] = 50 ether;
-
-        vault.fund(_tokens, _amounts, _endTimestamp);
+        amounts = new uint256[](2);
+        amounts[0] = TOKEN_FUND_VAULT;
+        amounts[1] = WETH_FUND_VAULT;
     }
 }
