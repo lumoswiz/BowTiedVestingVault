@@ -57,8 +57,8 @@ contract VestingVault is Ownable {
     }
 
     function fund(
-        address[] calldata _tokens,
-        uint256[] calldata _amounts,
+        address[] memory _tokens,
+        uint256[] memory _amounts,
         uint256 _endTimestamp
     ) external onlyOwner {
         if (fundCount.current() != 0) revert Error_VaultAlreadyFunded();
