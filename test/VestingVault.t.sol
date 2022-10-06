@@ -113,8 +113,6 @@ contract VestingVaultTest is Test {
     }
 
     function testUserCannotFundVault() public {
-        deployVault();
-
         uint256 endTimestamp = block.timestamp + 365 days;
 
         vm.startPrank(user);
@@ -131,8 +129,6 @@ contract VestingVaultTest is Test {
     }
 
     function testVaultEndTimestampLtMaxDuration() public {
-        deployVault();
-
         uint256 endTimestamp = block.timestamp + 1465 days; // MAX_VESTING_DURATION = 1460 days
 
         (
@@ -146,8 +142,6 @@ contract VestingVaultTest is Test {
     }
 
     function testBeneficiaryCanWithdrawFromVault() public {
-        deployVault();
-
         uint256 endTimestamp = block.timestamp + 365 days;
 
         (
