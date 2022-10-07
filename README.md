@@ -5,6 +5,17 @@
 ## Setup
 
 - Install [Foundry](https://github.com/foundry-rs/foundry).
+- To run the all tests, in CL enter:
+
+```sh
+forge test
+```
+
+- To run a specific test (with stack and setup traces displayed)
+
+```sh
+forge test --match-test [TEST_NAME_HERE] -vvvvv
+```
 
 ## Exercise Description
 
