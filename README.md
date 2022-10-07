@@ -11,7 +11,7 @@
 forge test
 ```
 
-- To run a specific test (with stack and setup traces displayed)
+- To run a specific test (with stack and setup traces displayed):
 
 ```sh
 forge test --match-test [TEST_NAME_HERE] -vvvvv
