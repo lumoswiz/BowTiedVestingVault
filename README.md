@@ -19,7 +19,7 @@ Bonus problems:
 
 - [x] Maximum vesting duration.
 - [x] Ability to also vest ETH. _My solution involves vesting WETH_.
-- [] Vesting curves (linear, linear with a cliff, etc). _To do._
+- [ ] Vesting curves (linear, linear with a cliff, etc). _To do._
 
 Contract can be found [here](./src/VestingVault.sol).
 
