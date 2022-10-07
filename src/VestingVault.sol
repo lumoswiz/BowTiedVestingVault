@@ -101,11 +101,11 @@ contract VestingVault is Ownable {
 
         for (uint256 i; i < vestingDetails.length; ++i) {
             if (vestingDetails[i].claimed == false) {
+                vestingDetails[i].claimed = true;
                 IERC20(vestingDetails[i].token).transfer(
                     beneficiary,
                     vestingDetails[i].amount
                 );
-                vestingDetails[i].claimed = true;
             }
         }
     }

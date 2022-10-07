@@ -9,8 +9,6 @@ import {Utilities} from "./utils/Utilities.sol";
 import {MockERC20} from "./utils/MockERC20.sol";
 import {WETH} from "solmate/tokens/WETH.sol";
 
-// import {IERC20} from "openzeppelin-contracts/token/ERC20/IERC20.sol";
-
 contract VestingVaultTest is Test {
     uint256 internal constant TOKEN_INITIAL_SUPPLY = 69_420e18;
 
@@ -152,9 +150,21 @@ contract VestingVaultTest is Test {
         vm.prank(vaultOwner);
         vault.fund(tokens, amounts, endTimestamp);
 
+        uint256 tknBalanceBefore = tkn.balanceOf(beneficiary);
+        uint256 wethBalanceBefore = weth.balanceOf(beneficiary);
+
         vm.warp(block.timestamp + 366 days);
         vm.prank(beneficiary);
         vault.withdraw();
+
+        assertEq(
+            stdMath.delta(tkn.balanceOf(beneficiary), tknBalanceBefore),
+            TOKEN_FUND_VAULT
+        );
+        assertEq(
+            stdMath.delta(weth.balanceOf(beneficiary), wethBalanceBefore),
+            WETH_FUND_VAULT
+        );
     }
 
     // Helper functions
