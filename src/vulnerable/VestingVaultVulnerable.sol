@@ -6,22 +6,18 @@ import {IERC20} from "openzeppelin-contracts/token/ERC20/IERC20.sol";
 import {Ownable} from "openzeppelin-contracts/access/Ownable.sol";
 import {Counters} from "openzeppelin-contracts/utils/Counters.sol";
 
-contract VestingVault is Ownable {
+struct VestingDetails {
+    address token;
+    uint256 amount;
+    bool claimed;
+}
+
+contract VestingVaultVulnerable is Ownable {
     /// -----------------------------------------------------------------------
     /// Library usage
     /// -----------------------------------------------------------------------
     using Counters for Counters.Counter;
     Counters.Counter public fundCount;
-
-    /// -----------------------------------------------------------------------
-    /// Struct
-    /// -----------------------------------------------------------------------
-
-    struct VestingDetails {
-        address token;
-        uint256 amount;
-        bool claimed;
-    }
 
     /// -----------------------------------------------------------------------
     /// Errors
@@ -32,7 +28,6 @@ contract VestingVault is Ownable {
     error Error_ZeroAmount();
     error Error_VestingNotOver();
     error Error_ExceedsMaxVestingDuration();
-    error Error_AlreadyClaimed();
 
     /// -----------------------------------------------------------------------
     /// Storage variables
@@ -42,7 +37,7 @@ contract VestingVault is Ownable {
 
     address public beneficiary;
 
-    uint256 public immutable startTimestamp;
+    uint256 public startTimestamp;
     uint256 public endTimestamp;
 
     VestingDetails[] public vestingDetails;
@@ -96,27 +91,23 @@ contract VestingVault is Ownable {
 
         // Set unlockTime of vault
         endTimestamp = _endTimestamp;
-
-        // Increment counter
-        fundCount.increment();
     }
 
-    function withdraw(uint256 index) external onlyBeneficiary {
+    function withdraw() external onlyBeneficiary returns (uint256 gasUsed) {
+        uint256 startGas = gasleft();
+
         if (block.timestamp < endTimestamp) revert Error_VestingNotOver();
 
-        if (vestingDetails[index].claimed == true)
-            revert Error_AlreadyClaimed();
+        for (uint256 i; i < vestingDetails.length; ++i) {
+            if (vestingDetails[i].claimed == false) {
+                vestingDetails[i].claimed = true;
+                IERC20(vestingDetails[i].token).transfer(
+                    beneficiary,
+                    vestingDetails[i].amount
+                );
+            }
+        }
 
-        IERC20(vestingDetails[index].token).transfer(
-            beneficiary,
-            vestingDetails[index].amount
-        );
-    }
-
-    /// -----------------------------------------------------------------------
-    /// View functions
-    /// -----------------------------------------------------------------------
-    function getVestingDetailsLength() public view returns (uint256) {
-        return vestingDetails.length;
+        gasUsed = startGas - gasleft();
     }
 }

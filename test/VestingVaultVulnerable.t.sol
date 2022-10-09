@@ -3,7 +3,7 @@ pragma solidity ^0.8.13;
 
 import "forge-std/Test.sol";
 
-import {VestingVault} from "../src/VestingVault.sol";
+import {VestingVaultVulnerable} from "../src/vulnerable/VestingVaultVulnerable.sol";
 
 import {Utilities} from "./utils/Utilities.sol";
 import {MockERC20} from "./utils/MockERC20.sol";
@@ -16,7 +16,7 @@ contract VestingVaultTest is Test {
     uint256 internal constant TOKEN_FUND_VAULT = 100e18;
 
     Utilities internal utils;
-    VestingVault internal vault;
+    VestingVaultVulnerable internal vault;
 
     address payable internal beneficiary;
     address payable internal vaultOwner;
@@ -28,7 +28,7 @@ contract VestingVaultTest is Test {
     function setUp() public {
         utils = new Utilities();
 
-        // Create users
+        // Create users: `beneficiary` and `vaultOwner`
         address payable[] memory users = utils.createUsers(3);
         beneficiary = users[0];
         vaultOwner = users[1];
@@ -56,6 +56,14 @@ contract VestingVaultTest is Test {
         vm.stopPrank();
     }
 
+    function testDeployVault() public {
+        vm.prank(vaultOwner);
+        vault = new VestingVaultVulnerable(beneficiary);
+
+        assertEq(vault.startTimestamp(), block.timestamp);
+        assertEq(vault.owner(), vaultOwner);
+    }
+
     function testFundVault() public {
         uint256 endTimestamp = block.timestamp + 365 days;
 
@@ -72,6 +80,13 @@ contract VestingVaultTest is Test {
 
         vm.prank(vaultOwner);
         vault.fund(tokens, amounts, endTimestamp);
+
+        for (uint256 i; i < tokens.length; ++i) {
+            (address addr, uint256 amt, bool claimed) = vault.vestingDetails(i);
+            assertEq(tokens[i], addr);
+            assertEq(amounts[i], amt);
+            assertEq(claimed, false);
+        }
 
         assertEq(
             stdMath.delta(ownerTknBalanceBefore, tkn.balanceOf(vaultOwner)),
@@ -93,27 +108,37 @@ contract VestingVaultTest is Test {
             ),
             WETH_FUND_VAULT
         );
-
-        assertEq(vault.fundCount(), 1);
     }
 
-    function testFundCannotBeCalledAgainByOwner() public {
+    function testUserCannotFundVault() public {
         uint256 endTimestamp = block.timestamp + 365 days;
 
-        address[] memory tokens = new address[](1);
-        tokens[0] = address(tkn);
+        vm.startPrank(user);
 
-        uint256[] memory amounts = new uint256[](1);
-        amounts[0] = 1 wei;
+        (
+            address[] memory tokens,
+            uint256[] memory amounts
+        ) = setFundTokenAmounts();
 
-        vm.startPrank(vaultOwner);
-
-        vault.fund(tokens, amounts, endTimestamp);
-
-        vm.expectRevert(VestingVault.Error_VaultAlreadyFunded.selector);
+        vm.expectRevert();
         vault.fund(tokens, amounts, endTimestamp);
 
         vm.stopPrank();
+    }
+
+    function testVaultEndTimestampLtMaxDuration() public {
+        uint256 endTimestamp = block.timestamp + 1465 days; // MAX_VESTING_DURATION = 1460 days
+
+        (
+            address[] memory tokens,
+            uint256[] memory amounts
+        ) = setFundTokenAmounts();
+
+        vm.prank(vaultOwner);
+        vm.expectRevert(
+            VestingVaultVulnerable.Error_ExceedsMaxVestingDuration.selector
+        );
+        vault.fund(tokens, amounts, endTimestamp);
     }
 
     function testBeneficiaryCanWithdrawFromVault() public {
@@ -130,14 +155,9 @@ contract VestingVaultTest is Test {
         uint256 tknBalanceBefore = tkn.balanceOf(beneficiary);
         uint256 wethBalanceBefore = weth.balanceOf(beneficiary);
 
-        uint256 maxIndex = vault.getVestingDetailsLength();
-
         vm.warp(block.timestamp + 366 days);
-        vm.startPrank(beneficiary);
-
-        for (uint256 i; i < maxIndex; ++i) {
-            vault.withdraw(i);
-        }
+        vm.prank(beneficiary);
+        vault.withdraw();
 
         assertEq(
             stdMath.delta(tkn.balanceOf(beneficiary), tknBalanceBefore),
@@ -149,11 +169,46 @@ contract VestingVaultTest is Test {
         );
     }
 
+    /// -----------------------------------------------------------------------
+    /// Additional test added after feedback from BowTiedPickle
+    /// -----------------------------------------------------------------------
+
+    /// Testing out-of-gas denial of service attack
+    function testOwnerCanFundVaultMultipleTimes() public {
+        uint256 endTimestamp = block.timestamp + 365 days;
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(tkn);
+
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 1 wei;
+
+        uint256 fundNum = 1_200;
+
+        vm.startPrank(vaultOwner);
+
+        for (uint256 i; i < fundNum; ++i) {
+            vault.fund(tokens, amounts, endTimestamp);
+        }
+
+        emit log_named_uint("Counter", vault.fundCount());
+
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + 366 days);
+        vm.prank(beneficiary);
+
+        uint256 gasUsed = vault.withdraw();
+        emit log_named_uint("Gas used on withdraw()", gasUsed);
+
+        // Gas used = 30_301_013 > block.gaslimit = 30_000_000 (ETH mainnet)
+    }
+
     // Helper functions
 
     function deployVault() public {
         vm.prank(vaultOwner);
-        vault = new VestingVault(beneficiary);
+        vault = new VestingVaultVulnerable(beneficiary);
     }
 
     function setFundTokenAmounts()
